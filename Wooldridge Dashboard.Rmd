@@ -1,0 +1,532 @@
+---
+title: "Wooldridge Dashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    theme: cerulean
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(DT)
+library(tidyverse)
+library(lmtest)
+library(ggplot2)
+library(wooldridge)
+library(car)
+library(psych)
+
+# Note: the "Regression Output" pane may have an extra scroll bar by default. 
+# You can fix this by modifying the following lines of css code in the 
+# flexdashboard.css file:
+# 
+# .chart-wrapper .chart-stage {
+# overflow: hidden;
+# padding: 5px 10px;
+#   position: relative;
+# }
+#
+# This file is found in the following directory:
+# C:\Program Files\R\R-3.4.2\library\flexdashboard\rmarkdown\templates\flex_dashboard\resources
+
+# Update graph options so that data table works (wasn't cooperating when these 
+# were specified in datatable R chunk)
+options(DT.options = list(scrollY="300px",scrollX="300px", autoWidth = TRUE))
+
+# import names of datasets available through wooldridge package
+data <- ls(package:wooldridge)
+
+updateData <- reactive(
+  get(input$dsOptions)
+)
+
+updateVars <- reactive(
+  get(input$dsOptions) %>% names() %>% as.list()
+)
+
+depVarSel <- reactive(
+  if(input$depVar %in% updateVars()){
+    depVarSel <- input$depVar
+  }
+  else{
+    depVarSel <- NULL
+  }
+)
+
+updateIndVars <- reactive(
+  get(input$dsOptions) %>% select(! depVarSel()) %>% names() %>% as.list()
+)
+
+indVarsSel <- reactive(
+  if(as.list(input$indVars)[length(input$indVars)] %in% updateVars()){
+    indVarsSel <- as.list(input$indVars)
+  }
+  else{
+    indVarsSel <- NULL
+  }
+)
+
+updateTestVars <- reactive(
+  indVarsSel()
+)
+
+
+```
+
+Regression Specification
+=======================================================================
+
+Input {.sidebar}
+-----------------------------------------------------------------------
+### Inputs
+
+```{r}
+# Inputs for the regression specification
+selectInput("dsOptions", "Data Set", choices = data, selected = data[16])
+selectInput("depVar","Dependent Variable", choices = "")
+selectInput("indVars","Independent Variables", choices = "", multiple = T)
+observeEvent(input$dsOptions,{
+  updateSelectInput(session, "depVar", choices = updateVars())
+})
+observeEvent(input$depVar,{
+  updateSelectInput(session, "indVars", choices = updateIndVars())
+})
+
+actionButton("runreg","Run Regression")
+
+# add space and horizontal line between inputs
+HTML("<br><br><br>")
+hr(style = "border-top: 2px solid #000000;")
+
+# Inputs for statistical inference
+selectInput("testVars","Variables to Test", choices = "", multiple = T)
+observeEvent(input$indVars,{
+  updateSelectInput(session, "testVars", choices = updateTestVars())
+})
+sliderInput("alphaLvl","Significance Level",0,1,.05)
+actionButton("sigTest","Test Significance")
+
+```
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Regression Output
+
+```{r}
+regression <- eventReactive(input$runreg,{
+  eval(parse(text=
+               paste0("lm(",
+                      input$depVar,
+                      "~",
+                      paste0(unlist(input$indVars), collapse = "+"),
+                      ",data=",
+                      input$dsOptions,
+                      ")")))
+  })
+
+renderPrint(
+  summary(regression())
+  )
+```
+
+-----------------------------------------------------------------------
+
+### Collinearity Analysis (Variance Inflation Factors)
+
+```{r}
+
+vifResults <- eventReactive(input$runreg, {
+  t(data.frame(vif(regression())))
+})
+
+
+
+renderDT(
+  datatable(vifResults(), rownames = F, options = list(
+    dom = 't',
+    scrollX = T)) %>% formatRound(c(1:ncol(vifResults())),4)
+)
+
+# plotCorr <- eventReactive(input$runreg, {
+#   updateData()[which(names(updateData()) == indVarsSel())] %>% pairs.panels()
+# })
+# 
+# renderPlot(
+#   plotCorr()
+# )
+
+```
+
+### Heteroskedasticity Analysis
+
+```{r}
+bpVal <- eventReactive(input$runreg,{
+  bpVal <- round(eval(bptest(regression()))[[1]],4)
+})
+dfVal <- eventReactive(input$runreg,{
+  dfVal <- eval(bptest(regression()))[[2]]
+})
+pVal <- eventReactive(input$runreg,{
+  pVal <- round(eval(bptest(regression()))[[4]],4)
+})
+
+htroskdPlot <- eventReactive(input$runreg,{
+  plot(regression(), which=c(1), id.n = 0, caption = paste("Studentized Breusch-Pagan Test Results:",
+                                                           paste(
+                                                             paste("BP:", bpVal()),
+                                                             paste("df:", dfVal()),
+                                                             paste("p value:", pVal()),
+                                                             sep = ", "),
+                                                           "",
+                                                           sep = "\n"
+  ))
+})
+renderPlot(
+  htroskdPlot()
+)
+
+```
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Test a Single Variable for Statistical Significance
+
+```{r}
+# Compute row index of variable of interest within the regression summary. This
+# allows for retrieval of the estimated beta_hat and standard error
+
+
+rowIndex <- reactive(
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    rowIndex <- which(row.names(summary(regression())$coef) == input$testVars)
+  }
+  else{
+    rowIndex <- NULL
+  })
+
+betaHat <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    betaHat <- summary(regression())$coef[rowIndex(),1]
+  }
+  else{
+    betaHat <- NULL
+  }
+})
+
+se <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    se <- summary(regression())$coef[rowIndex(),2]
+  }
+  else{
+    se <- NULL
+  }
+})
+
+dfTTest <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    dfTTest <- regression()$df
+  }
+  else{
+    dfTTest <- NULL
+  }
+})
+
+tCrit <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    tCrit <- qt(1-input$alphaLvl/2,dfTTest())
+  }
+  else{
+    tCrit <- NULL
+  }
+})
+
+tDist <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    tDist <- function(x) {dt(x/se(), dfTTest())}
+  }
+  else{
+    tDist <- NULL
+  }
+})
+
+sigTextT <- eventReactive(input$sigTest, {
+  if(summary(regression())$coef[rowIndex(),4] < input$alphaLvl){
+    sigTextT <- annotate(geom = "text",
+                        label = expression(paste(hat(beta),
+                                                 " is statistically significant")),
+                        size = 5,
+                        x = 3*se(),
+                        y = dt(0,dfTTest()*1.1),
+                        color = "blue4")
+  }
+  else{
+    sigTextT <- annotate(geom = "text",
+                        label = expression(paste(hat(beta),
+                                                 " is not statistically significant")),
+                        size = 5,
+                        x = 3*se(),
+                        y = dt(0,dfTTest()*1.1),
+                        color = "red4") 
+  }
+})
+
+# b/c the default plot spans 10 std devs, betaHat()+se()/3 represents a horizontal 
+# placement 1/30th of the plot's width to the right of betaHat(). If betaHat() is
+# more than 5 std dev away from the midpoint, I must recalculate the width of the 
+# graph in terms of std devs and then divide by 30 in order to have consistent 
+# spacing. This is what the else statement does.
+betaText <- eventReactive(input$sigTest,{
+  if(abs(summary(regression())$coef[rowIndex(),3]) < 5){
+    betaText <- annotate(geom = "text",
+                         label = paste("=",round(betaHat(),3)),
+                         size = 5,
+                         x = betaHat()+(se()/3),
+                         y = dt(0,dfTTest())*.77)
+  }
+  else{
+    betaText <- annotate(geom = "text",
+                         label = paste("=",round(betaHat(),3)),
+                         size = 5,
+                         x = betaHat() + ((abs(betaHat())/se()+5)/30)*se(),
+                         y = dt(0,dfTTest())*.77)
+  }
+})
+
+tPlot <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
+    ggplot(data.frame(x = c(-5*se(), 5*se())), aes(x = x)) +
+      stat_function(fun = tDist(),
+                    size = 1.2,
+                    color = "#1F3552") +
+      geom_segment(aes(x = betaHat(), y = 0 , xend = betaHat(), yend = dt(0,dfTTest())*.7),
+                   linetype = 2,
+                   size = 0.75) +
+      annotate(geom = "text",
+               label = expression(hat(beta)),
+               size = 5,
+               x = betaHat(),
+               y = dt(0,dfTTest())*.78) +
+      betaText() +
+      stat_function(fun = tDist(), aes(fill = "blue4"),
+                    geom = "area",
+                    alpha = 0.2,
+                    xlim = range(-se()*tCrit(), -5*se())) +
+      stat_function(fun = tDist(), aes(fill = "blue4"),
+                    geom = "area",
+                    alpha = 0.2,
+                    xlim = range(se()*tCrit(), 5*se())) +
+      sigTextT() +
+      scale_fill_identity(name ="", guide = "legend", labels = "Rejection\nRegion") +
+      theme(axis.line.x.bottom = element_line(colour = "black"),
+            axis.ticks.y = element_blank(),
+            axis.text.y = element_blank(),
+            axis.title.y = element_blank(),
+            axis.title.x = element_blank(),
+            legend.text = element_text(size = 14),
+            axis.text.x = element_text(size = 16),
+            panel.background = element_blank(),
+            text=element_text(family="serif"), # must use serif for unicode values to work correctly
+            plot.title = element_text(size = 18, hjust = 0.5)) +
+      labs(title = "H\u2080: \u03b2 = 0,    H\u2090: \u03b2 \u2260 0")
+  }
+  else{
+    ggplot() +
+      annotate(geom = "text",
+                x = 4,
+               y = 25,
+               size = 8,
+               label = "You must use the next panel to test\nmultiple variables at once") +
+      theme_void()
+  }
+})
+
+renderPlot(
+  tPlot()
+)
+
+###################################################### 
+
+```
+
+
+
+### Test of Joint Significance (Multiple Variables)
+```{r}
+# Create relevant parameters
+restrictionVars <- eventReactive(input$sigTest, {
+  c(input$testVars)
+})
+
+fTest <- eventReactive(input$sigTest, {
+  linearHypothesis(regression(),restrictionVars())
+})
+
+df1 <- eventReactive(input$sigTest, {
+  fTest()[2,3]
+})
+df2 <- eventReactive(input$sigTest, {
+  fTest()[2,1]
+})
+
+fDist <- eventReactive(input$sigTest,{
+  if(length(input$testVars) > 1){
+    fDist <- function(x){df(x, df1(), df2())}
+  }
+  else{
+    fDist <- NULL
+  }
+})
+
+fDistUBnd <- eventReactive(input$sigTest, {
+  qf(.999,df1(),df2())
+})
+
+fVal <- eventReactive(input$sigTest, {
+  fTest()[2,5]
+})
+
+fCrit <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) > 1){
+    fCrit <- qf(input$alphaLvl, df1(), df2(), lower.tail = FALSE)
+  }
+  else{
+    fCrit <- NULL
+  }
+})
+
+# Generate text to denote statistical significance in plot
+sigTextF <- eventReactive(input$sigTest, {
+  if(fTest()[2,6] < input$alphaLvl){
+    sigTextF <- annotate(geom = "text",
+                        label = "Variables are jointly statistically significant",
+                        size = 5,
+                        x = max(fDistUBnd(), fVal())*.7,
+                        y = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                             %>% max())*.9,
+                        color = "blue4")
+  }
+  else{
+    sigTextF <- annotate(geom = "text",
+                        label = "Variables are not jointly statistically significant",
+                        size = 5,
+                        x = max(fDistUBnd(), fVal())*.7,
+                        y = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                             %>% max())*.9,
+                        color = "red4") 
+  }
+})
+
+# Generate text to denote F value in plot
+fText <- eventReactive(input$sigTest,{
+  fText <- annotate(geom = "text",
+                    label = paste("F =",round(fVal(),3)),
+                    size = 5,
+                    x = fVal(),
+                    y = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                             %>% max())*.65)
+})
+
+# Create plot with same dimensions as fPlot, to provide x and y coordinates for 
+# text and F value line in fPlot
+dimPlot <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) > 1 ){
+    ggplot(data.frame(x = c(0, fDistUBnd())), aes(x = x)) +
+      stat_function(fun = fDist()) +
+      geom_segment(aes(x = fVal(),
+                       y = 0 , 
+                       xend = fVal(), 
+                       yend = 0.001))
+  }
+})
+
+# Create F distribution plot to show how statistical significance is determined
+fPlot <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) > 1 ){
+    ggplot(data.frame(x = c(0, fDistUBnd())), aes(x = x)) +
+      stat_function(fun = fDist(),
+                    size = 1.2,
+                    color = "#1F3552") +
+      geom_segment(aes(x = fVal(),
+                       y = 0 , 
+                       xend = fVal(), 
+                       yend = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                             %>% max())*.6),
+                   linetype = 2,
+                   size = 0.75) +
+      fText() +
+      stat_function(fun = fDist(), aes(fill = "blue4"),
+                    geom = "area",
+                    alpha = 0.2,
+                    xlim = range(fCrit(), max(fDistUBnd(), fVal()))) +
+      sigTextF() +
+      scale_fill_identity(name ="", guide = "legend", labels = "Rejection\nRegion") +
+      theme(axis.line.x.bottom = element_line(colour = "black"),
+            axis.ticks.y = element_blank(),
+            axis.text.y = element_blank(),
+            axis.title.y = element_blank(),
+            axis.title.x = element_blank(),
+            legend.text = element_text(size = 14),
+            axis.text.x = element_text(size = 16),
+            panel.background = element_blank(),
+            text=element_text(family="serif"), # must use serif for unicode values to work correctly
+            plot.title = element_text(size = 18, hjust = 0.5)) +
+      labs(title = "H\u2080: All \u03b2 selected = 0,    H\u2090: H\u2080 is false")
+  }
+    else{
+    ggplot() +
+      annotate(geom = "text",
+                x = 4,
+               y = 25,
+               size = 8,
+               label = "You must use the previous panel\nto test a single variable") +
+      theme_void()
+  }
+})
+
+renderPlot(
+  fPlot()
+)
+```
+
+
+
+Data
+=======================================================================
+
+Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Data
+
+```{r}
+renderDT(
+  datatable(updateData(), rownames = F, extensions = 'Buttons', editable=F,
+  options = list(
+    dom = 'Blrtip',
+    buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+    scrollX = T,
+    lengthMenu = list(c(10,50,100,-1),c(10,50,100,"All")))) %>% 
+      formatRound(c(1:ncol(data.frame(updateData()))),2)
+) 
+```
+
+### Data Description
+```{r}
+All <- reactive(
+  nrow(data.frame(describe(updateData())))
+)
+renderDT(
+  datatable(describe(updateData()), rownames = T,
+  options = list(
+    dom = 'Blrtip',
+    scrollX = T,
+    lengthMenu = list(c(10,All()),c(10,"All"))))%>% 
+      formatRound(c(1:ncol(data.frame(describe(updateData())))),2)
+)
+```
+
+
