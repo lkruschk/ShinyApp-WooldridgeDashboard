@@ -4,10 +4,10 @@ username:
 account: lkruschk
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
-appId: 5348638
-bundleId: 5390524
+appId: 5354295
+bundleId: 5394745
 url: https://lkruschk.shinyapps.io/WooldridgeDashboard/
-when: 1639928032.98399
-lastSyncTime: 1639928032.98399
+when: 1640031352.07155
+lastSyncTime: 1640031352.07155
 asMultiple: FALSE
 asStatic: FALSE

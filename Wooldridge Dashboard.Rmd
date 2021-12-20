@@ -310,27 +310,29 @@ sigTextT <- eventReactive(input$sigTest, {
   }
 })
 
-# b/c the default plot spans 10 std devs, betaHat()+se()/3 represents a horizontal 
-# placement 1/30th of the plot's width to the right of betaHat(). If betaHat() is
-# more than 5 std dev away from the midpoint, I must recalculate the width of the 
-# graph in terms of std devs and then divide by 30 in order to have consistent 
-# spacing. This is what the else statement does.
-betaText <- eventReactive(input$sigTest,{
-  if(abs(summary(regression())$coef[rowIndex(),3]) < 5){
-    betaText <- annotate(geom = "text",
-                         label = paste("=",round(betaHat(),3)),
-                         size = 5,
-                         x = betaHat()+(se()/3),
-                         y = dt(0,dfTTest())*.77)
-  }
-  else{
-    betaText <- annotate(geom = "text",
-                         label = paste("=",round(betaHat(),3)),
-                         size = 5,
-                         x = betaHat() + ((abs(betaHat())/se()+5)/30)*se(),
-                         y = dt(0,dfTTest())*.77)
+# Create plot with same dimensions as tPlot, to provide x and y coordinates for 
+# text and beta value in tPlot
+dimPlotT <- eventReactive(input$sigTest, {
+  if(length(as.list(input$testVars)) == 1 ){
+    ggplot(data.frame(x = c(-5*se(), 5*se())), aes(x = x)) +
+      stat_function(fun = tDist())
   }
 })
+
+# Create text to accompany beta^hat label ( expression(hat(beta)) doesn't work
+# well when nested inside paste(), so I have to break the label up into two separate 
+# graph pieces)
+betaText <- eventReactive(input$sigTest,{
+  annotate(geom = "text",
+           label = paste("=",round(betaHat(),3)),
+           size = 5,
+           x = betaHat() + 
+             (ggplot_build(dimPlotT())$layout$panel_scales_x[[1]]$range$range 
+              %>% max())/10,
+           y = dt(0,dfTTest())*.77)
+})
+
+
 
 tPlot <- eventReactive(input$sigTest, {
   if(length(as.list(input$testVars)) == 1 & input$testVars != ""){
@@ -441,7 +443,7 @@ sigTextF <- eventReactive(input$sigTest, {
                         label = "Variables are jointly statistically significant",
                         size = 5,
                         x = max(fDistUBnd(), fVal())*.7,
-                        y = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                        y = (ggplot_build(dimPloF())$layout$panel_scales_y[[1]]$range$range 
                              %>% max())*.9,
                         color = "blue4")
   }
@@ -450,7 +452,7 @@ sigTextF <- eventReactive(input$sigTest, {
                         label = "Variables are not jointly statistically significant",
                         size = 5,
                         x = max(fDistUBnd(), fVal())*.7,
-                        y = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                        y = (ggplot_build(dimPlotF())$layout$panel_scales_y[[1]]$range$range 
                              %>% max())*.9,
                         color = "red4") 
   }
@@ -462,13 +464,13 @@ fText <- eventReactive(input$sigTest,{
                     label = paste("F =",round(fVal(),3)),
                     size = 5,
                     x = fVal(),
-                    y = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                    y = (ggplot_build(dimPlotF())$layout$panel_scales_y[[1]]$range$range 
                              %>% max())*.65)
 })
 
 # Create plot with same dimensions as fPlot, to provide x and y coordinates for 
 # text and F value line in fPlot
-dimPlot <- eventReactive(input$sigTest, {
+dimPlotF <- eventReactive(input$sigTest, {
   if(length(as.list(input$testVars)) > 1 ){
     ggplot(data.frame(x = c(0, fDistUBnd())), aes(x = x)) +
       stat_function(fun = fDist()) +
@@ -489,7 +491,7 @@ fPlot <- eventReactive(input$sigTest, {
       geom_segment(aes(x = fVal(),
                        y = 0 , 
                        xend = fVal(), 
-                       yend = (ggplot_build(dimPlot())$layout$panel_scales_y[[1]]$range$range 
+                       yend = (ggplot_build(dimPlotF())$layout$panel_scales_y[[1]]$range$range 
                              %>% max())*.6),
                    linetype = 2,
                    size = 0.75) +
