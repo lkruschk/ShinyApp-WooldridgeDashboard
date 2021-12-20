@@ -38,6 +38,7 @@ options(DT.options = list(scrollY="300px",scrollX="300px", autoWidth = TRUE))
 # import names of datasets available through wooldridge package
 data <- ls(package:wooldridge)
 
+# Define reactive functions to update input options
 updateData <- reactive(
   get(input$dsOptions)
 )
@@ -84,7 +85,7 @@ Input {.sidebar}
 
 ```{r}
 # Inputs for the regression specification
-selectInput("dsOptions", "Data Set", choices = data, selected = data[16])
+selectInput("dsOptions", "Data Set", choices = data, selected = data[17])
 selectInput("depVar","Dependent Variable", choices = "")
 selectInput("indVars","Independent Variables", choices = "", multiple = T)
 observeEvent(input$dsOptions,{
@@ -97,7 +98,7 @@ observeEvent(input$depVar,{
 actionButton("runreg","Run Regression")
 
 # add space and horizontal line between inputs
-HTML("<br><br><br>")
+HTML("<br><br>")
 hr(style = "border-top: 2px solid #000000;")
 
 # Inputs for statistical inference
@@ -111,6 +112,41 @@ actionButton("sigTest","Test Significance")
 ```
 
 Row {.tabset .tabset-fade}
+-----------------------------------------------------------------------
+
+### Dataset Overview
+
+```{r, results='asis'}
+
+# Define function to print documentation for datasets. Credit to Noam Ross for 
+# the code. 
+help_console <- function(topic, format=c("text", "html", "latex", "Rd"),
+                         lines=NULL, before=NULL, after=NULL) {  
+  format = match.arg(format)
+  if (!is.character(topic)) topic <- deparse(substitute(topic))
+  helpfile = utils:::.getHelpFile(help(topic))
+  hs <- capture.output(switch(format, 
+                              text=tools:::Rd2txt(helpfile),
+                              html=tools:::Rd2HTML(helpfile),
+                              latex=tools:::Rd2latex(helpfile),
+                              Rd=tools:::prepare_Rd(helpfile)
+  )
+  )
+  if(!is.null(lines)) hs <- hs[lines]
+  hs <- c(before, hs, after)
+  paste0(unlist(hs), collapse = "")
+}
+
+help_text <- reactive(
+  help_console(input$dsOptions, "html")
+)
+
+renderUI(
+  HTML(text = help_text())
+)
+
+```
+
 -----------------------------------------------------------------------
 
 ### Regression Output
@@ -514,7 +550,7 @@ renderDT(
 ) 
 ```
 
-### Data Description
+### Descriptive Statistics
 ```{r}
 All <- reactive(
   nrow(data.frame(describe(updateData())))
