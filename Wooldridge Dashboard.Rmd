@@ -313,6 +313,7 @@ dimPlotT <- eventReactive(input$sigTest, {
   }
 })
 
+# Create max and min values to generate range of X axis
 dimPlotTMax <-  eventReactive(input$sigTest,{
   (ggplot_build(dimPlotT())$layout$panel_scales_x[[1]]$range$range %>% max())
 })
@@ -325,12 +326,13 @@ dimPlotTRange <- eventReactive(input$sigTest,{
 
 # Create text to accompany beta^hat label (expression(hat(beta)) doesn't work
 # well when nested inside paste(), so I have to break the label up into two separate 
-# graph pieces)
+# graph pieces). Note that coefficients with many digits mess up the spacing, so
+# the x value is designed to increase the spacing the more digits are in the coefficient
 betaText <- eventReactive(input$sigTest,{
       annotate(geom = "text",
            label = paste("=",round(betaHat(),3)),
            size = 5,
-           x = betaHat() + (dimPlotTRange()/20)*(max((floor(log10(abs(betaHat()))))^(1/3),
+           x = betaHat() + (dimPlotTRange()/20)*(max((abs(floor(log10(abs(betaHat())))))^(1/3),
                                                      1)),
            y = dt(0,dfTTest())*.77)
 })
